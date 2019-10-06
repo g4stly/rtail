@@ -8,7 +8,7 @@
 #define DEFAULT_BUF_SZ (3)
 #define BUF_SZ 1
 
-void parse_options(int argc, char **argv, char **command_str, int *buf_sz)
+void parse_options(int argc, char **argv, char **command_str, int *buf_sz, int *del_buf)
 {
 	int len, arg = 1, target = 0;
 	for (arg = 1; arg < argc; arg++) {
@@ -25,6 +25,9 @@ void parse_options(int argc, char **argv, char **command_str, int *buf_sz)
 		switch (argv[arg][1]) {
 		case 'b':
 			target = BUF_SZ;
+			break;
+		case 'd':
+			*del_buf = 1;
 			break;
 		default:
 			fprintf(stderr, "bad option: %s\n", argv[arg]);
@@ -62,9 +65,9 @@ void parse_options(int argc, char **argv, char **command_str, int *buf_sz)
 
 int main(int argc, char ** argv)
 {
-	int buf_sz = 3;
 	char *command_str = NULL;
-	parse_options(argc, argv, &command_str, &buf_sz);
+	int del_buf = 0, buf_sz = DEFAULT_BUF_SZ;
+	parse_options(argc, argv, &command_str, &buf_sz, &del_buf);
 
 	/*
 	 * there are sort of several problems with this,
@@ -106,15 +109,21 @@ int main(int argc, char ** argv)
 		n = 0;
 	}
 	if (err < 0) free(line);
-	putp(cursor_visible);
-	reset_shell_mode();
 	fclose(queue);
 
 	for (int i = 0; i < buf_sz; i++) {
-		if (line_buffer[i]) free(line_buffer[i]);
+		if (line_buffer[i]) {
+			if (del_buf) {
+				putp(cursor_up);
+				putp(clr_eol);
+			}
+			free(line_buffer[i]);
+		}
 	}
 
 	system("rm -f /tmp/tempfifo");
+	putp(cursor_normal);
+	reset_shell_mode();
 	free(command_str);
 
 	return 0;
