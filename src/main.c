@@ -68,9 +68,7 @@ int main(int argc, char ** argv)
 
 	/*
 	 * there are sort of several problems with this,
-	 * this program will crash hard if the user
-	 * specified commands fail in some way. there
-	 * should be some way to respond to the failure
+	 * there should be some way to respond to the failure
 	 * of the below commands.
 	 */
 
