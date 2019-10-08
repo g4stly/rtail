@@ -1,12 +1,20 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <errno.h>
+
+#include <sys/types.h>
+#include <sys/stat.h>
+
 #include <curses.h>
 #include <term.h>
+
 #include "util.h"
 
 #define DEFAULT_BUF_SZ (3)
 #define BUF_SZ 1
+
+static const char *const FIFO_PATH = "/tmp/rtail_fifo";
 
 void parse_options(int argc, char **argv, char **command_str, int *buf_sz, int *del_buf)
 {
@@ -75,16 +83,22 @@ int main(int argc, char ** argv)
 	 * of the below commands.
 	 */
 
-	system("rm -f /tmp/rtail_fifo");
-	system("mkfifo /tmp/rtail_fifo");
+	int err;
+
+	err = remove(FIFO_PATH);
+	if (err < 0 && errno != ENOENT) die("remove():");
+
+	err = mkfifo(FIFO_PATH, S_IRWXU);
+	if (err < 0) die("mkfifo():");
+
 	system(command_str);
 
-	int err;
 	size_t n = 0;
 	int count = 0;
 	char *line = NULL;
 	char *line_buffer[buf_sz];
-	FILE *queue = fopen("/tmp/rtail_fifo", "r");
+	FILE *queue = fopen(FIFO_PATH, "r");
+	if (!queue) die("fopen():");
 
 	for (int i = 0; i < buf_sz; i++) {
 		line_buffer[i] = NULL;
@@ -103,13 +117,24 @@ int main(int argc, char ** argv)
 			}
 			count = buf_sz - 1;
 		}
+		int x;
+		int y = strlen(line) > 80 ? 80 : strlen(line);
+		for (x = 0; x < y; x++) {
+			if (line[x] == '\n') {
+				line[x+1] = '\0';
+				break;
+			}
+		}
+		if (x == 79) { line[x] = '\0'; }
 		putp(clr_eol);
 		printf("%s", line_buffer[count++] = line);
 		line = NULL;
 		n = 0;
 	}
-	if (err < 0) free(line);
+
 	fclose(queue);
+	remove(FIFO_PATH);
+	if (err < 0) free(line);
 
 	for (int i = 0; i < buf_sz; i++) {
 		if (line_buffer[i]) {
@@ -121,7 +146,6 @@ int main(int argc, char ** argv)
 		}
 	}
 
-	system("rm -f /tmp/tempfifo");
 	putp(cursor_normal);
 	reset_shell_mode();
 	free(command_str);
