@@ -5,100 +5,90 @@
 
 #include <sys/types.h>
 #include <sys/stat.h>
+#include <unistd.h>
 
 #include <curses.h>
 #include <term.h>
 
 #include "util.h"
 
+#define ARG_IDX (0)
+#define BUF_SZ 	(1)
+#define DEL_BUF (2)
+
 #define DEFAULT_BUF_SZ (3)
-#define BUF_SZ 1
 
-static const char *const FIFO_PATH = "/tmp/rtail_fifo";
-
-void parse_options(int argc, char **argv, char **command_str, int *buf_sz, int *del_buf)
-{
-	int len, arg = 1, target = 0;
-	for (arg = 1; arg < argc; arg++) {
-		switch (target) {
-		case BUF_SZ:
-			*buf_sz = atoi(argv[arg]);
-			if (!*buf_sz) *buf_sz = DEFAULT_BUF_SZ;
-			target = 0;
-			continue;
-		}
-
-		if (argv[arg][0] != '-') break;
-
-		switch (argv[arg][1]) {
-		case 'b':
-			target = BUF_SZ;
-			break;
-		case 'd':
-			*del_buf = 1;
-			break;
-		default:
-			fprintf(stderr, "bad option: %s\n", argv[arg]);
-			break;
-		}
-	}
-
-	if (arg >= argc) {
-		die("usage: %s [options] command ...\n", argv[0]);
-	}
+#define READ 	(0)
+#define WRITE 	(1)
 
 
-	len = strlen(argv[arg]);
-	*command_str = malloc(len + 1);
-	if (!*command_str) die ("malloc():");
-
-	memset(*command_str, 0, len + 1);
-	strncpy(*command_str, argv[arg], len);
-
-	for (arg += 1; arg < argc; arg++) {
-		len += strlen(argv[arg]) + 1;
-		*command_str = realloc(*command_str, len + 1);
-		if (!*command_str) die("realloc():");
-		strcat(*command_str, " ");
-		strcat(*command_str, argv[arg]);
-	}
-
-	// TODO: maybe avoid duplicate literals
-	len += strlen(" > /tmp/rtail_fifo &");
-	*command_str = realloc(*command_str, len + 1);
-	if (!*command_str) die("realloc():");
-	strcat(*command_str, " > /tmp/rtail_fifo &");
-
-}
+void parse_options(int argc, char **argv, int *args);
+void child_main(int argc, char **argv, int *args, int *channel);
+int rtail_main(int *args, int *channel);
 
 int main(int argc, char ** argv)
 {
-	char *command_str = NULL;
-	int del_buf = 0, buf_sz = DEFAULT_BUF_SZ;
-	parse_options(argc, argv, &command_str, &buf_sz, &del_buf);
+	int pid, err;
+	int channel[2];
+	int args[] = { 1, DEFAULT_BUF_SZ, 0 };
 
-	/*
-	 * there are sort of several problems with this,
-	 * there should be some way to respond to the failure
-	 * of the below commands.
-	 */
+	err = pipe(channel);
+	if (err < 0) die("pipe():");
 
-	int err;
+	parse_options(argc, argv, args);
 
-	err = remove(FIFO_PATH);
-	if (err < 0 && errno != ENOENT) die("remove():");
+	pid = fork();
+	if (pid == 0) child_main(argc, argv, args, channel);
+	if (pid < 0) die("fork():");
+	return rtail_main(args, channel);
+}
 
-	err = mkfifo(FIFO_PATH, S_IRWXU);
-	if (err < 0) die("mkfifo():");
+void parse_options(int argc, char **argv, int *args)
+{
+	char *arg;
+	int target = -1;
+	for (args[ARG_IDX] = 1; args[ARG_IDX] < argc; args[ARG_IDX]++) {
+		arg = argv[args[ARG_IDX]];
 
-	system(command_str);
+		switch (target) {
+		case BUF_SZ:
+			args[BUF_SZ] = atoi(arg);
+			if (!args[BUF_SZ]) args[BUF_SZ] = DEFAULT_BUF_SZ;
+			target = -1;
+			continue;
+		}
+
+		if (arg[0] != '-') break;
+
+		switch (arg[1]) {
+		case 'b':
+		case 'n':
+			target = BUF_SZ;
+			break;
+		case 'd':
+			args[DEL_BUF] = 1;
+			break;
+		default:
+			fprintf(stderr, "bad option: %s\n", arg);
+			break;
+		}
+	}
+	if (args[ARG_IDX] >= argc) {
+		die("usage: %s [options] command ...\n", argv[0]);
+	}
+}
+
+int rtail_main(int *args, int *channel)
+{
 
 	size_t n = 0;
-	int count = 0;
 	char *line = NULL;
+	int err, count = 0;
+	int buf_sz = args[BUF_SZ];
 	char *line_buffer[buf_sz];
-	FILE *queue = fopen(FIFO_PATH, "r");
-	if (!queue) die("fopen():");
+	FILE *input = fdopen(channel[READ], "r");
+	if (!input) die("fdopen():");
+	close(channel[WRITE]);
 
 	for (int i = 0; i < buf_sz; i++) {
 		line_buffer[i] = NULL;
@@ -106,7 +96,8 @@ int main(int argc, char ** argv)
 
 	setupterm(NULL, 1, NULL);
 	putp(cursor_invisible);
-	while ((err = getline(&line, &n, queue)) > 0) {
+
+	while ((err = getline(&line, &n, input)) > 0) {
 		if (count >= buf_sz) {
 			free(line_buffer[0]);
 			putp(tiparm(parm_up_cursor, buf_sz));
@@ -132,13 +123,15 @@ int main(int argc, char ** argv)
 		n = 0;
 	}
 
-	fclose(queue);
-	remove(FIFO_PATH);
-	if (err < 0) free(line);
+	putp(cursor_normal);
+	reset_shell_mode();
 
+	fclose(input);
+
+	if (err < 0) free(line);
 	for (int i = 0; i < buf_sz; i++) {
 		if (line_buffer[i]) {
-			if (del_buf) {
+			if (args[DEL_BUF]) {
 				putp(cursor_up);
 				putp(clr_eol);
 			}
@@ -146,9 +139,19 @@ int main(int argc, char ** argv)
 		}
 	}
 
-	putp(cursor_normal);
-	reset_shell_mode();
-	free(command_str);
-
 	return 0;
+}
+
+void child_main(int argc, char **argv, int *args, int *channel)
+{
+	close(channel[READ]);
+	dup2(channel[WRITE], STDOUT_FILENO);
+	close(channel[WRITE]);
+
+	/*
+	 * TODO: use wordexp, use path search
+	 */
+	if (execv(argv[args[ARG_IDX]], argv + args[ARG_IDX]) < 0) {
+		die("execv():");
+	}
 }
