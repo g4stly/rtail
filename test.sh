@@ -1,6 +1,6 @@
 #!/bin/bash
 
-echo aaaa
+echo aaaa >&2
 sleep 1
 
 echo bbbbbbbb
