@@ -161,8 +161,8 @@ int rtail_main(int *args, int *channel)
 				line[x] = '\0';
 				break;
 			}
+			if (x == 79) { line[x] = '\0'; }
 		}
-		if (x == 79) { line[x] = '\0'; }
 		putp(clr_eol);
 		printf("%s\n", line_buffer[count++] = line);
 		line = NULL;
