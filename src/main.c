@@ -17,8 +17,12 @@
 #define BUF_SZ	(1)
 #define DEL_BUF	(2)
 #define SUP_ERR	(3)
+#define TRNCATE (4)
 
-#define DEFAULT_BUF_SZ	(3)
+#define DEF_BUF_SZ	(3)
+#define DEF_DEL_BUF	(0)
+#define DEF_SUP_ERR	(0)
+#define DEF_TRNCATE	(0)
 
 #define READ 	(0)
 #define WRITE 	(1)
@@ -32,7 +36,12 @@ int main(int argc, char ** argv)
 {
 	int pid, err;
 	int channel[2];
-	int args[] = { 1, DEFAULT_BUF_SZ, 0, 0 };
+	int args[] = { 1,
+		DEF_BUF_SZ,
+		DEF_DEL_BUF,
+       		DEF_SUP_ERR,
+		DEF_TRNCATE
+	};
 
 	err = pipe(channel);
 	if (err < 0) die("pipe():");
@@ -55,7 +64,7 @@ void parse_options(int argc, char **argv, int *args)
 		switch (target) {
 		case BUF_SZ:
 			args[BUF_SZ] = atoi(arg);
-			if (!args[BUF_SZ]) args[BUF_SZ] = DEFAULT_BUF_SZ;
+			if (!args[BUF_SZ]) args[BUF_SZ] = DEF_BUF_SZ;
 			target = -1;
 			continue;
 		}
@@ -72,6 +81,9 @@ void parse_options(int argc, char **argv, int *args)
 			break;
 		case 'e':
 			args[SUP_ERR] = 1;
+			break;
+		case 't':
+			args[TRNCATE] = 1;
 			break;
 		default:
 			fprintf(stderr, "bad option: %s\n", arg);
@@ -127,46 +139,70 @@ void child_main(int argc, char **argv, int *args, int *channel)
 int rtail_main(int *args, int *channel)
 {
 
-	size_t n = 0;
-	char *line = NULL;
-	int err, count = 0;
-	int buf_sz = args[BUF_SZ];
-	char *line_buffer[buf_sz];
+	char c;
+	// int buf_sz = args[BUF_SZ];
+	char *line_buf[args[BUF_SZ]];
 	FILE *input = fdopen(channel[READ], "r");
 	if (!input) die("fdopen():");
 	close(channel[WRITE]);
 
-	for (int i = 0; i < buf_sz; i++) {
-		line_buffer[i] = NULL;
-	}
 
 	setupterm(NULL, 1, NULL);
 	putp(cursor_invisible);
 
-	while ((err = getline(&line, &n, input)) > 0) {
-		if (count >= buf_sz) {
-			free(line_buffer[0]);
-			putp(tiparm(parm_up_cursor, buf_sz));
-			for (int i = 1; i < buf_sz; i++) {
+	int line_len = 0;	// length of current line
+	int line_cap = 8;	// capacity of current line
+	int line_idx = 0;	// index
+	int cols = tgetnum("columns");
+
+	// initialize line buffer
+	for (int i = 0; i < args[BUF_SZ]; i++) {
+		line_buf[i] = malloc(line_cap * sizeof(**line_buf));
+		if (!line_buf[i]) die("malloc():");
+		memset(line_buf[i], 0, line_cap);
+	}
+
+	//TODO: optimize
+	while ((c = fgetc(input)) != EOF) {
+		// rollover case
+		if (line_idx >= args[BUF_SZ]) {
+			free(line_buf[0]);
+			putp(tiparm(parm_up_cursor, args[BUF_SZ]));
+			for (int i = 1; i < args[BUF_SZ]; i++) {
 				putp(tiparm(clr_eol));
-				printf("%s\n", line_buffer[i - 1] = line_buffer[i]);
+				printf("%s\n", line_buf[i - 1] = line_buf[i]);
 				putp(carriage_return);
 			}
-			count = buf_sz - 1;
+			line_idx = args[BUF_SZ] - 1;
+			line_buf[line_idx] = malloc(line_cap * sizeof(**line_buf));
+			if (!line_buf[line_idx]) die("malloc():");
+			line_cap = 8;
+			line_len = 0;
 		}
-		int x;
-		int y = strlen(line) > 80 ? 80 : strlen(line);
-		for (x = 0; x < y; x++) {
-			if (line[x] == '\n') {
-				line[x] = '\0';
-				break;
+		// grow line case
+		if (line_len >= line_cap - 2) {
+			line_buf[line_idx] = realloc(
+				line_buf[line_idx], 
+				line_cap * 2 * sizeof(**line_buf)
+			);
+			if (!line_buf[line_idx]) die("realloc():");
+			memset(line_buf[line_idx] + line_cap , 0, line_cap);
+			line_cap = line_cap << 1;
+		}
+		// truncate / extra lines case
+		if (c != '\n') {
+			if (line_len < cols - 1) {
+				line_buf[line_idx][line_len++] = c;
+				continue;
 			}
-			if (x == 79) { line[x] = '\0'; }
+			if (args[TRNCATE]) {
+				while ((c = fgetc(input)) != '\n');
+			}
 		}
 		putp(clr_eol);
-		printf("%s\n", line_buffer[count++] = line);
-		line = NULL;
-		n = 0;
+		printf("%s\n", line_buf[line_idx++]);
+		line_cap = 8;
+		line_len = 0;
 	}
 
 	putp(cursor_normal);
@@ -174,14 +210,13 @@ int rtail_main(int *args, int *channel)
 
 	fclose(input);
 
-	if (err < 0) free(line);
-	for (int i = 0; i < buf_sz; i++) {
-		if (line_buffer[i]) {
+	for (int i = 0; i < args[BUF_SZ]; i++) {
+		if (line_buf[i]) {
 			if (args[DEL_BUF]) {
 				putp(cursor_up);
 				putp(clr_eol);
 			}
-			free(line_buffer[i]);
+			free(line_buf[i]);
 		}
 	}
 

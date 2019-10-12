@@ -1,15 +1,15 @@
 #!/bin/bash
 
-echo aaaa >&2
-sleep 1
-
-echo bbbbbbbb
+echo 0123456789abcdefghijklmnopqrstuvwxyz!!!!0123456789abcdefghijklmnopqrstuvwxyz!!!!extra characters
 sleep 1
 
 echo cc
 sleep 1
 
 echo dddd
+sleep 1
+
+echo 0123456789abcdefghijklmnopqrstuvwxyz!!!!0123456789abcdefghijklmnopqrstuvwxyz!!!!extra characters
 sleep 1
 
 echo eeeeeeee
