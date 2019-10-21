@@ -138,21 +138,19 @@ void child_main(int argc, char **argv, int *args, int *channel)
 
 int rtail_main(int *args, int *channel)
 {
+	setupterm(NULL, 1, NULL);
 
 	char c;
 	int line_len = 0;	// length of current line
 	int line_cap = 8;	// capacity of current line
 	int line_idx = 0;	// index
-	int cols = tgetnum("columns");
+	int cols = COLS;
 	char *line_buf[args[BUF_SZ]];
 	FILE *input = fdopen(channel[READ], "r");
 	if (!input) die("fdopen():");
 	close(channel[WRITE]);
 
-
-	setupterm(NULL, 1, NULL);
 	putp(cursor_invisible);
-
 
 	// initialize line buffer
 	for (int i = 0; i < args[BUF_SZ]; i++) {
