@@ -140,7 +140,10 @@ int rtail_main(int *args, int *channel)
 {
 
 	char c;
-	// int buf_sz = args[BUF_SZ];
+	int line_len = 0;	// length of current line
+	int line_cap = 8;	// capacity of current line
+	int line_idx = 0;	// index
+	int cols = tgetnum("columns");
 	char *line_buf[args[BUF_SZ]];
 	FILE *input = fdopen(channel[READ], "r");
 	if (!input) die("fdopen():");
@@ -150,10 +153,6 @@ int rtail_main(int *args, int *channel)
 	setupterm(NULL, 1, NULL);
 	putp(cursor_invisible);
 
-	int line_len = 0;	// length of current line
-	int line_cap = 8;	// capacity of current line
-	int line_idx = 0;	// index
-	int cols = tgetnum("columns");
 
 	// initialize line buffer
 	for (int i = 0; i < args[BUF_SZ]; i++) {
